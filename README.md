@@ -165,4 +165,4 @@ astrbot_plugin_deep_think_switch/
 
 ## 📝 License
 
-Apache License 2.0
+MIT license
