@@ -4,15 +4,6 @@
 
 ---
 
-## ✨ 功能
-
-- **`/max 对话内容`** — 直接对当前消息开启 DeepSeek 最大思考力度模式
-- **一次性生效** — 仅当前这一次 LLM 请求使用 `reasoning_effort="max"`，响应后自动恢复
-- **`reasoning_content` 自动补全** — 修复 DeepSeek V3.2+ / V4 Thinking Mode 下 tool call 场景的 `reasoning_content` 缺失问题，防止 API 400 错误
-- **零入侵** — 不修改 AstrBot 核心代码，完全通过插件钩子实现
-
----
-
 ## 📦 安装
 
 将插件目录放置到 AstrBot 的 `plugins/` 目录下，然后在仪表板中启用。
@@ -22,7 +13,8 @@ plugins/
 └── astrbot_plugin_deep_think_switch/
     ├── main.py
     ├── metadata.yaml
-    └── README.md
+    ├── README.md
+    └── CHANGELOG.md
 ```
 
 > 无需额外依赖。
@@ -60,7 +52,7 @@ plugins/
 
 ---
 
-## 🔧 技术细节
+## 🔧 工作原理
 
 ### 注入参数
 
@@ -80,67 +72,62 @@ plugins/
             → DeepSeek API 接收并应用
 ```
 
-### reasoning_content 修复
+### ⚠️ 重要限制
 
-DeepSeek V3.2+ 和 V4 在 thinking mode 下发生 tool call 时，后续请求的 `assistant` 消息**必须携带 `reasoning_content`**，否则 API 返回 400 错误。本插件通过以下方式解决：
+DeepSeek V3.2+ / V4 在 thinking mode 下进行 tool call 时，要求后续请求必须携带 `reasoning_content`。由于 AstrBot 的 `Message` 类未包含此字段，**thinking mode 与 tool_use 同时开启会导致 API 400 错误**。
 
-1. **`on_llm_response`** — 缓存最近一次 thinking 响应的 `reasoning_content`
-2. **`on_llm_request`** — 扫描历史消息中带 `tool_calls` 但缺 `reasoning_content` 的 assistant 消息，自动补全
+因此，启用 `/max` 时插件会**临时禁用 tool_use**，避免产生需要 `reasoning_content` 的工具调用消息。这保证 `/max` 请求稳定返回深度思考结果，但代价是该次请求无法使用函数工具。
 
-### 兼容性
+> 不影响非 `/max` 请求，工具调用在普通模式下正常工作。
 
-| 模型 | 状态 |
-|------|------|
-| `deepseek-v4-flash` | ✅ 完全兼容 |
-| `deepseek-v4-pro` | ✅ 完全兼容 |
-| `deepseek-chat` / `deepseek-reasoner` | ✅ 兼容 |
-
----
-
-## 📋 命令
-
-| 命令 | 说明 |
-|------|------|
-| `/max <内容>` | 对指定内容开启最大深度思考模式，仅本次生效 |
-
----
-
-## 🗺️ 工作流程
+### 工作流程
 
 ```
 用户: /max 请用中文解释量子纠缠的原理
-
                   │
                   ▼
-    ┌─────────────────────────────┐
-    │ on_llm_request 钩子         │
-    │                             │
-    │ 1. 检测 /max 前缀           │
-    │ 2. 剥离前缀，保留实际内容   │
-    │ 3. 修复历史 reasoning_content│
-    │ 4. 注入 thinking + max      │
-    └─────────────┬───────────────┘
+    ┌─────────────────────────────────┐
+    │ on_llm_request 钩子             │
+    │                                 │
+    │ 1. 检测 /max 前缀               │
+    │ 2. 剥离前缀，保留实际内容       │
+    │ 3. 注入 thinking.enabled + max  │
+    │ 4. 临时禁用 tool_use 🛡️        │
+    └─────────────┬───────────────────┘
                   │
                   ▼
-    ┌─────────────────────────────┐
-    │ LLM API 请求                │
-    │ extra_body: {               │
-    │   thinking: {type: enabled},│
-    │   reasoning_effort: max     │
-    │ }                           │
-    └─────────────┬───────────────┘
+    ┌─────────────────────────────────┐
+    │ LLM API 请求 (no tool_use)      │
+    │ extra_body: {                   │
+    │   thinking: {type: enabled},    │
+    │   reasoning_effort: max         │
+    │ }                               │
+    └─────────────┬───────────────────┘
                   │
                   ▼
-    ┌─────────────────────────────┐
-    │ on_llm_response 钩子        │
-    │                             │
-    │ 1. 缓存 reasoning_content   │
-    │ 2. 恢复原始 Provider 配置   │
-    └─────────────────────────────┘
-                  │
-                  ▼
-              响应完成
+    ┌─────────────────────────────────┐
+    │ on_llm_response 钩子            │
+    │                                 │
+    │ 1. 恢复原始 Provider 配置       │
+    │ 2. tool_use 自动恢复（下一请求）│
+    └─────────────────────────────────┘
 ```
+
+---
+
+## 📋 配置
+
+无额外配置项。插件读取 AstrBot 的 Provider 配置中的 `custom_extra_body` 字段。
+
+---
+
+## 🔌 兼容性
+
+| 模型 | 深度思考 | tool_use |
+|------|---------|----------|
+| `deepseek-v4-flash` | ✅ | ✅（/max 时暂停） |
+| `deepseek-v4-pro` | ✅ | ✅（/max 时暂停） |
+| `deepseek-chat` / `deepseek-reasoner` | ✅ | ✅（/max 时暂停） |
 
 ---
 
@@ -150,19 +137,12 @@ DeepSeek V3.2+ 和 V4 在 thinking mode 下发生 tool call 时，后续请求�
 astrbot_plugin_deep_think_switch/
 ├── main.py          # 插件主逻辑
 ├── metadata.yaml     # 插件元数据
-└── README.md         # 本文件
+├── README.md         # 本文件
+└── CHANGELOG.md      # 更新日志
 ```
-
----
-
-## 🐛 已知问题 / 注意事项
-
-- 插件依赖 `ProviderRequest.contexts` 来获取消息列表，请确保 AstrBot 版本支持此属性
-- `reasoning_content` 缓存基于会话 ID，不同会话互不干扰
-- 插件终止时会自动清理所有缓存和备份配置，不会留下残留状态
 
 ---
 
 ## 📝 License
 
-MIT license
+Apache License 2.0
