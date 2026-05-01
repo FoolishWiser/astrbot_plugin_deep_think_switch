@@ -1,4 +1,0 @@
-name: astrbot_plugin_deep_think_switch
-author: ZYT
-version: 1.0.0
-description: 发送 /max 对话内容 直接对此内容开启 DeepSeek 深度思考模式（Max），仅当前一次生效，不影响后续对话。
